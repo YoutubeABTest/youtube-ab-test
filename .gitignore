@@ -1,0 +1,28 @@
+# Environment variables
+.env
+.env.*
+backend/.env*
+
+# Google OAuth secrets
+client_secrets.json
+backend/client_secrets.json
+
+# Node modules
+node_modules/
+yt-ab-test-frontend/node_modules/
+
+# Build outputs
+yt-ab-test-frontend/dist/
+yt-ab-test-frontend/build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
