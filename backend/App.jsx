@@ -1,6 +1,5 @@
 import React, { useState, useEffect } from 'react';
 
-// Use the working API URL directly
 const API_BASE_URL = 'https://xa0etg74tg.execute-api.us-east-1.amazonaws.com/prod';
 
 function App( ) {
@@ -8,16 +7,10 @@ function App( ) {
   const [apiResponse, setApiResponse] = useState(null);
 
   useEffect(() => {
-    console.log('Attempting to connect to:', API_BASE_URL);
-    
     // Test API connection
     fetch(`${API_BASE_URL}/`)
-      .then(response => {
-        console.log('API Response status:', response.status);
-        return response.json();
-      })
+      .then(response => response.json())
       .then(data => {
-        console.log('API Response data:', data);
         setApiResponse(data);
         setStatus('Connected to API');
       })
