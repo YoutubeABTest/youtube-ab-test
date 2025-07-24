@@ -131,3 +131,4 @@ function App( ) {
 }
 
 export default App;
+// Deploying from the correct directory

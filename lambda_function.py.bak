@@ -58,7 +58,7 @@ def lambda_handler(event, context ):
         
         if error:
             # Redirect back to frontend with error
-            frontend_url = 'https://main.dsdpk99revgwl.amplifyapp.com'
+            frontend_url = 'https://main.d221lm5zo3j68g.amplifyapp.com'
             return {
                 'statusCode': 302,
                 'headers': {
@@ -99,7 +99,7 @@ def lambda_handler(event, context ):
                 
                 if access_token:
                     # Redirect back to frontend with success
-                    frontend_url = 'https://main.dsdpk99revgwl.amplifyapp.com'
+                    frontend_url = 'https://main.d221lm5zo3j68g.amplifyapp.com'
                     # Encode the access token for URL safety
                     encoded_token = base64.urlsafe_b64encode(access_token.encode( )).decode()
                     return {
@@ -115,7 +115,7 @@ def lambda_handler(event, context ):
                     
             except Exception as e:
                 # Redirect back to frontend with error
-                frontend_url = 'https://main.dsdpk99revgwl.amplifyapp.com'
+                frontend_url = 'https://main.d221lm5zo3j68g.amplifyapp.com'
                 return {
                     'statusCode': 302,
                     'headers': {
@@ -126,7 +126,7 @@ def lambda_handler(event, context ):
                 }
         
         # If no code or error, redirect back to frontend
-        frontend_url = 'https://main.dsdpk99revgwl.amplifyapp.com'
+        frontend_url = 'https://main.d221lm5zo3j68g.amplifyapp.com'
         return {
             'statusCode': 302,
             'headers': {
