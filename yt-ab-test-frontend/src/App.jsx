@@ -1,3 +1,4 @@
+// Forcing a new build with this comment
 import React, { useState, useEffect } from 'react';
 
 // Use the working API URL directly
