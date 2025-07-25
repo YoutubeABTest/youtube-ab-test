@@ -3,256 +3,249 @@ import React, { useState, useEffect } from 'react';
 // Get API URL from environment variable or use fallback
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://xa0etg74tg.execute-api.us-east-1.amazonaws.com/prod';
 
-function App() {
-  const [status, setStatus] = useState('Connecting...');
-  const [apiResponse, setApiResponse] = useState(null);
-  const [authStatus, setAuthStatus] = useState('Not authenticated');
+function App( ) {
   const [accessToken, setAccessToken] = useState(null);
+  const [authStatus, setAuthStatus] = useState('Checking authentication...');
+  const [videos, setVideos] = useState([]);
+  const [tests, setTests] = useState([]);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  const [activeTab, setActiveTab] = useState('videos');
+  const [showCreateTest, setShowCreateTest] = useState(false);
+  const [selectedVideo, setSelectedVideo] = useState(null);
 
+  // Handle authentication on initial load
   useEffect(() => {
-    // Check URL parameters for OAuth response
     const urlParams = new URLSearchParams(window.location.search);
-    const success = urlParams.get('success');
-    const error = urlParams.get('error');
     const token = urlParams.get('token');
-
-    if (success === 'true' && token) {
-      // Decode the access token
+    if (token) {
       try {
         const decodedToken = atob(token);
         setAccessToken(decodedToken);
-        setAuthStatus('Successfully authenticated with YouTube!');
-        
-        // Clear URL parameters
-        window.history.replaceState({}, document.title, window.location.pathname);
+        setAuthStatus('Successfully authenticated!');
+        window.history.replaceState({}, document.title, window.location.pathname); // Clean URL
       } catch (e) {
-        console.error('Token decode error:', e);
-        setAuthStatus('Authentication successful but token decode failed');
-        setError('Failed to decode authentication token');
+        setError('Authentication failed: Invalid token.');
       }
-    } else if (error) {
-      setAuthStatus(`Authentication failed: ${error}`);
-      setError(`Authentication error: ${error}`);
-      // Clear URL parameters
-      window.history.replaceState({}, document.title, window.location.pathname);
+    } else {
+      setAuthStatus('Not authenticated.');
     }
-
-    // Test API connection with better error handling
-    console.log('Attempting to connect to:', API_BASE_URL);
-    
-    fetch(`${API_BASE_URL}/`, {
-      method: 'GET',
-      headers: {
-        'Accept': 'application/json',
-        'Content-Type': 'application/json',
-      },
-    })
-      .then(response => {
-        console.log('API Response status:', response.status);
-        if (!response.ok) {
-          throw new Error(`HTTP error! status: ${response.status}`);
-        }
-        return response.json();
-      })
-      .then(data => {
-        console.log('API Response data:', data);
-        setApiResponse(data);
-        setStatus('Connected to API');
-        setError(null);
-      })
-      .catch(error => {
-        console.error('API Error:', error);
-        setStatus('Failed to connect to API');
-        setError(`API connection failed: ${error.message}`);
-      });
   }, []);
 
+  // Fetch data when access token or active tab changes
+  useEffect(() => {
+    if (accessToken) {
+      if (activeTab === 'videos') fetchVideos();
+      if (activeTab === 'tests') fetchTests();
+    }
+  }, [accessToken, activeTab]);
+
   const handleLogin = () => {
-    console.log('Redirecting to login:', `${API_BASE_URL}/login`);
     window.location.href = `${API_BASE_URL}/login`;
   };
 
   const handleLogout = () => {
     setAccessToken(null);
-    setAuthStatus('Not authenticated');
+    setAuthStatus('Logged out.');
+    setVideos([]);
+    setTests([]);
+  };
+
+  const fetchVideos = async () => {
+    setLoading(true);
     setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/videos`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setVideos(data.videos || []);
+      } else {
+        throw new Error(data.error || 'Failed to fetch videos');
+      }
+    } catch (error) {
+      setError(`Error fetching videos: ${error.message}`);
+    }
+    setLoading(false);
+  };
+
+  const fetchTests = async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/tests`, {
+        headers: { 'Authorization': `Bearer ${accessToken}` }
+      });
+      const data = await response.json();
+      if (response.ok) {
+        setTests(data || []);
+      } else {
+        throw new Error(data.error || 'Failed to fetch tests');
+      }
+    } catch (error) {
+      setError(`Error fetching tests: ${error.message}`);
+    }
+    setLoading(false);
+  };
+
+  const createTest = async (testData) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await fetch(`${API_BASE_URL}/tests`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(testData)
+      });
+      const data = await response.json();
+      if (response.ok) {
+        alert('A/B Test created successfully!');
+        setShowCreateTest(false);
+        setSelectedVideo(null);
+        setActiveTab('tests'); // Switch to tests tab to see the new test
+      } else {
+        throw new Error(data.error || 'Failed to create test');
+      }
+    } catch (error) {
+      alert(`Error creating test: ${error.message}`);
+    }
+    setLoading(false);
+  };
+
+  const handleCreateTestClick = (video) => {
+    setSelectedVideo(video);
+    setShowCreateTest(true);
+  };
+
+  // --- RENDER LOGIC ---
+
+  if (!accessToken) {
+    return (
+      <div style={styles.container}>
+        <h1>YouTube A/B Testing Tool</h1>
+        <p>{authStatus}</p>
+        <button onClick={handleLogin} style={styles.loginButton}>Connect YouTube Account</button>
+        {error && <p style={styles.errorText}>{error}</p>}
+      </div>
+    );
+  }
+
+  return (
+    <div style={styles.container}>
+      <div style={styles.header}>
+        <h1>YouTube A/B Testing Tool</h1>
+        <button onClick={handleLogout} style={styles.logoutButton}>Logout</button>
+      </div>
+      
+      {error && <p style={styles.errorText}>{error}</p>}
+
+      <div style={styles.tabs}>
+        <button onClick={() => setActiveTab('videos')} style={activeTab === 'videos' ? styles.activeTab : styles.tab}>My Videos</button>
+        <button onClick={() => setActiveTab('tests')} style={activeTab === 'tests' ? styles.activeTab : styles.tab}>A/B Tests</button>
+      </div>
+
+      {loading && <p>Loading...</p>}
+
+      {activeTab === 'videos' && !loading && (
+        <div style={styles.grid}>
+          {videos.map(video => (
+            <div key={video.id} style={styles.card}>
+              <img src={video.thumbnail} alt={video.title} style={styles.thumbnail} />
+              <h3 style={styles.cardTitle}>{video.title}</h3>
+              <p style={styles.cardDate}>Published: {new Date(video.publishedAt).toLocaleDateString()}</p>
+              <button onClick={() => handleCreateTestClick(video)} style={styles.createButton}>Create A/B Test</button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {activeTab === 'tests' && !loading && (
+        <div style={styles.grid}>
+          {tests.length > 0 ? tests.map(test => (
+            <div key={test.testId} style={styles.card}>
+              <h3 style={styles.cardTitle}>{test.videoTitle}</h3>
+              <div style={styles.variants}>
+                <div><strong>A (Original):</strong> {test.variantA.title}</div>
+                <div><strong>B (Test):</strong> {test.variantB.title}</div>
+              </div>
+              <p style={styles.cardDate}>Status: <span style={{color: 'green', textTransform: 'capitalize'}}>{test.status}</span></p>
+              <p style={styles.cardDate}>Created: {new Date(test.createdAt).toLocaleString()}</p>
+            </div>
+          )) : <p>No A/B tests found. Create one from the "My Videos" tab!</p>}
+        </div>
+      )}
+
+      {showCreateTest && selectedVideo && (
+        <CreateTestModal video={selectedVideo} onClose={() => setShowCreateTest(false)} onSubmit={createTest} loading={loading} />
+      )}
+    </div>
+  );
+}
+
+function CreateTestModal({ video, onClose, onSubmit, loading }) {
+  const [variantA, setVariantA] = useState({ title: video.title, thumbnail: video.thumbnail });
+  const [variantB, setVariantB] = useState({ title: '', thumbnail: '' });
+
+  const handleSubmit = (e) => {
+    e.preventDefault();
+    if (!variantB.title.trim()) {
+      alert('Please enter a title for Variant B.');
+      return;
+    }
+    onSubmit({ videoId: video.id, videoTitle: video.title, originalThumbnail: video.thumbnail, variantA, variantB });
   };
 
   return (
-    <div style={{ 
-      padding: '20px', 
-      fontFamily: 'Arial, sans-serif',
-      maxWidth: '800px',
-      margin: '0 auto'
-    }}>
-      <h1 style={{ color: '#333', marginBottom: '30px' }}>YouTube A/B Testing Tool</h1>
-      
-      {/* Error Display */}
-      {error && (
-        <div style={{ 
-          background: '#ffe6e6', 
-          padding: '15px', 
-          borderRadius: '5px', 
-          border: '1px solid #ffcccc',
-          marginBottom: '20px',
-          color: '#cc0000'
-        }}>
-          <h4>⚠️ Error:</h4>
-          <p>{error}</p>
-        </div>
-      )}
-      
-      {/* Status Display */}
-      <div style={{ marginBottom: '20px' }}>
-        <div style={{ 
-          display: 'grid', 
-          gridTemplateColumns: '1fr 1fr', 
-          gap: '10px',
-          marginBottom: '20px'
-        }}>
-          <div style={{ 
-            background: status === 'Connected to API' ? '#e8f5e8' : '#fff3cd', 
-            padding: '10px', 
-            borderRadius: '5px',
-            border: `1px solid ${status === 'Connected to API' ? '#c3e6cb' : '#ffeaa7'}`
-          }}>
-            <strong>API Status:</strong> {status}
+    <div style={styles.modalOverlay}>
+      <div style={styles.modalContent}>
+        <h2>Create Test for: {video.title}</h2>
+        <form onSubmit={handleSubmit}>
+          <div style={styles.formGroup}>
+            <label>Variant A (Original Title)</label>
+            <input type="text" value={variantA.title} onChange={(e) => setVariantA({ ...variantA, title: e.target.value })} style={styles.input} />
           </div>
-          <div style={{ 
-            background: accessToken ? '#e8f5e8' : '#f8f9fa', 
-            padding: '10px', 
-            borderRadius: '5px',
-            border: `1px solid ${accessToken ? '#c3e6cb' : '#dee2e6'}`
-          }}>
-            <strong>Auth Status:</strong> {authStatus}
+          <div style={styles.formGroup}>
+            <label>Variant B (New Title)</label>
+            <input type="text" value={variantB.title} onChange={(e) => setVariantB({ ...variantB, title: e.target.value })} style={styles.input} placeholder="Enter new title for testing" required />
           </div>
-        </div>
-        
-        {apiResponse && (
-          <details style={{ marginBottom: '20px' }}>
-            <summary style={{ 
-              cursor: 'pointer', 
-              padding: '10px', 
-              background: '#f8f9fa', 
-              borderRadius: '5px',
-              border: '1px solid #dee2e6'
-            }}>
-              View API Response Details
-            </summary>
-            <div style={{ 
-              background: '#f0f0f0', 
-              padding: '15px', 
-              borderRadius: '0 0 5px 5px', 
-              border: '1px solid #dee2e6',
-              borderTop: 'none'
-            }}>
-              <pre style={{ 
-                margin: 0, 
-                fontSize: '12px', 
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap'
-              }}>
-                {JSON.stringify(apiResponse, null, 2)}
-              </pre>
-            </div>
-          </details>
-        )}
-
-        {accessToken && (
-          <div style={{ 
-            background: '#e8f5e8', 
-            padding: '15px', 
-            borderRadius: '5px', 
-            marginBottom: '20px',
-            border: '1px solid #c3e6cb'
-          }}>
-            <h4 style={{ margin: '0 0 10px 0', color: '#155724' }}>
-              ✅ YouTube Access Token Received!
-            </h4>
-            <p style={{ margin: '0 0 10px 0', fontSize: '14px' }}>
-              Token: <code>{accessToken.substring(0, 20)}...</code>
-            </p>
-            <button 
-              onClick={handleLogout}
-              style={{
-                padding: '8px 15px',
-                fontSize: '14px',
-                backgroundColor: '#dc3545',
-                color: 'white',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer'
-              }}
-            >
-              Logout
-            </button>
+          <div style={styles.modalActions}>
+            <button type="button" onClick={onClose} style={styles.cancelButton} disabled={loading}>Cancel</button>
+            <button type="submit" style={styles.submitButton} disabled={loading}>{loading ? 'Creating...' : 'Start A/B Test'}</button>
           </div>
-        )}
-      </div>
-
-      {/* Main Action Area */}
-      {!accessToken ? (
-        <div style={{ textAlign: 'center' }}>
-          <button 
-            onClick={handleLogin}
-            disabled={status !== 'Connected to API'}
-            style={{
-              padding: '15px 30px',
-              fontSize: '18px',
-              backgroundColor: status === 'Connected to API' ? '#4285f4' : '#6c757d',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: status === 'Connected to API' ? 'pointer' : 'not-allowed',
-              boxShadow: '0 2px 4px rgba(0,0,0,0.1)'
-            }}
-          >
-            Connect YouTube Account
-          </button>
-          {status !== 'Connected to API' && (
-            <p style={{ color: '#6c757d', marginTop: '10px' }}>
-              Please wait for API connection before logging in...
-            </p>
-          )}
-        </div>
-      ) : (
-        <div style={{ 
-          background: '#d4edda', 
-          padding: '20px', 
-          borderRadius: '8px', 
-          border: '1px solid #c3e6cb',
-          textAlign: 'center'
-        }}>
-          <h3 style={{ margin: '0 0 15px 0', color: '#155724' }}>
-            🎉 Successfully Connected to YouTube!
-          </h3>
-          <p style={{ margin: '0 0 10px 0', color: '#155724' }}>
-            You can now use the A/B testing features.
-          </p>
-          <p style={{ margin: 0, fontStyle: 'italic', color: '#6c757d' }}>
-            Next: We'll add functionality to fetch your videos and create A/B tests.
-          </p>
-        </div>
-      )}
-
-      {/* Debug Info */}
-      <div style={{ 
-        marginTop: '30px', 
-        padding: '15px',
-        fontSize: '12px', 
-        color: '#6c757d',
-        background: '#f8f9fa',
-        borderRadius: '5px',
-        border: '1px solid #dee2e6'
-      }}>
-        <h4 style={{ margin: '0 0 10px 0' }}>Debug Information:</h4>
-        <p><strong>API Endpoint:</strong> {API_BASE_URL}</p>
-        <p><strong>Environment:</strong> {import.meta.env.MODE}</p>
-        <p><strong>Build Time:</strong> {new Date().toISOString()}</p>
+        </form>
       </div>
     </div>
   );
 }
+
+// Basic styling
+const styles = {
+  container: { padding: '20px', fontFamily: 'Arial, sans-serif', maxWidth: '1200px', margin: '0 auto' },
+  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px' },
+  loginButton: { padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '5px' },
+  logoutButton: { padding: '8px 12px', cursor: 'pointer', backgroundColor: '#db4437', color: 'white', border: 'none', borderRadius: '5px' },
+  tabs: { margin: '20px 0', borderBottom: '1px solid #ccc' },
+  tab: { padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px' },
+  activeTab: { padding: '10px 20px', border: 'none', cursor: 'pointer', fontSize: '16px', borderBottom: '3px solid #4285F4', fontWeight: 'bold' },
+  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' },
+  card: { border: '1px solid #ddd', borderRadius: '8px', padding: '15px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' },
+  thumbnail: { width: '100%', borderRadius: '4px', aspectRatio: '16 / 9', objectFit: 'cover' },
+  cardTitle: { fontSize: '16px', margin: '10px 0', flexGrow: 1 },
+  cardDate: { fontSize: '12px', color: '#666' },
+  createButton: { width: '100%', padding: '10px', border: 'none', borderRadius: '4px', backgroundColor: '#34A853', color: 'white', cursor: 'pointer', fontSize: '14px', marginTop: '10px' },
+  variants: { fontSize: '14px', background: '#f8f9fa', padding: '10px', borderRadius: '4px', margin: '10px 0' },
+  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
+  modalContent: { background: 'white', padding: '30px', borderRadius: '8px', width: '90%', maxWidth: '500px', boxShadow: '0 5px 15px rgba(0,0,0,0.3)' },
+  formGroup: { marginBottom: '15px' },
+  input: { width: 'calc(100% - 22px)', padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' },
+  modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' },
+  cancelButton: { padding: '10px 20px', border: '1px solid #ccc', borderRadius: '4px', background: 'white', cursor: 'pointer' },
+  submitButton: { padding: '10px 20px', border: 'none', borderRadius: '4px', background: '#4285F4', color: 'white', cursor: 'pointer' },
+  errorText: { color: 'red', background: '#ffe6e6', padding: '10px', borderRadius: '5px', border: '1px solid red' }
+};
 
 export default App;
