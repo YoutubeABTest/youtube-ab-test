@@ -1,251 +1,358 @@
 import React, { useState, useEffect } from 'react';
+import './App.css';
 
-// Get API URL from environment variable or use fallback
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'https://xa0etg74tg.execute-api.us-east-1.amazonaws.com/prod';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://xa0etg74tg.execute-api.us-east-1.amazonaws.com/prod';
 
 function App( ) {
+  const [status, setStatus] = useState('Connecting...');
+  const [authStatus, setAuthStatus] = useState('Not authenticated');
   const [accessToken, setAccessToken] = useState(null);
-  const [authStatus, setAuthStatus] = useState('Checking authentication...');
+  const [channels, setChannels] = useState([]);
+  const [selectedChannel, setSelectedChannel] = useState(null);
   const [videos, setVideos] = useState([]);
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [activeTab, setActiveTab] = useState('videos');
+  const [activeTab, setActiveTab] = useState('channels');
   const [showCreateTest, setShowCreateTest] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
+  const [newTitle, setNewTitle] = useState('');
+  const [showChannelSelector, setShowChannelSelector] = useState(false);
 
-  // Handle authentication on initial load
   useEffect(() => {
+    // Check URL parameters for OAuth response
     const urlParams = new URLSearchParams(window.location.search);
+    const success = urlParams.get('success');
+    const error = urlParams.get('error');
     const token = urlParams.get('token');
-    if (token) {
+
+    if (success === 'true' && token) {
       try {
         const decodedToken = atob(token);
         setAccessToken(decodedToken);
-        setAuthStatus('Successfully authenticated!');
-        window.history.replaceState({}, document.title, window.location.pathname); // Clean URL
+        setAuthStatus('Successfully authenticated with YouTube!');
+        window.history.replaceState({}, document.title, window.location.pathname);
+        fetchChannels(decodedToken);
       } catch (e) {
-        setError('Authentication failed: Invalid token.');
+        setAuthStatus('Authentication successful but token decode failed');
       }
-    } else {
-      setAuthStatus('Not authenticated.');
+    } else if (error) {
+      setAuthStatus(`Authentication failed: ${error}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
     }
-  }, []);
 
-  // Fetch data when access token or active tab changes
-  useEffect(() => {
-    if (accessToken) {
-      if (activeTab === 'videos') fetchVideos();
-      if (activeTab === 'tests') fetchTests();
+    // Test API connection
+    fetch(`${API_BASE_URL}/`)
+      .then(response => response.json())
+      .then(data => {
+        setStatus('✅ Connected to API');
+        if (data.needsChannel && accessToken) {
+          setActiveTab('channels');
+        }
+      })
+      .catch(error => {
+        setStatus('❌ Failed to connect to API');
+        console.error('API connection error:', error);
+      });
+  }, [accessToken]);
+
+  const fetchChannels = async (token) => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_BASE_URL}/channels`, {
+        headers: {
+          'Authorization': `Bearer ${token || accessToken}`
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setChannels(data.channels);
+        if (data.selectedChannelId) {
+          const selected = data.channels.find(c => c.id === data.selectedChannelId);
+          if (selected) {
+            setSelectedChannel(selected);
+            setActiveTab('videos');
+          }
+        }
+      }
+    } catch (error) {
+      console.error('Failed to fetch channels:', error);
+    } finally {
+      setLoading(false);
     }
-  }, [accessToken, activeTab]);
+  };
+
+  const selectChannel = async (channel) => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_BASE_URL}/channels/select`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`
+        },
+        body: JSON.stringify({ channelId: channel.id })
+      });
+      
+      if (response.ok) {
+        setSelectedChannel(channel);
+        setShowChannelSelector(false);
+        setActiveTab('videos');
+        fetchVideos(channel.id);
+      }
+    } catch (error) {
+      console.error('Failed to select channel:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchVideos = async (channelId) => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_BASE_URL}/videos`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'X-YouTube-Channel-Id': channelId || selectedChannel?.id
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setVideos(data.videos);
+      }
+    } catch (error) {
+      console.error('Failed to fetch videos:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const fetchTests = async () => {
+    if (!selectedChannel) return;
+    
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_BASE_URL}/tests`, {
+        headers: {
+          'Authorization': `Bearer ${accessToken}`,
+          'X-YouTube-Channel-Id': selectedChannel.id
+        }
+      });
+      
+      if (response.ok) {
+        const data = await response.json();
+        setTests(data.tests);
+      }
+    } catch (error) {
+      console.error('Failed to fetch tests:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const createTest = async () => {
+    try {
+      setLoading(true);
+      const response = await fetch(`${API_BASE_URL}/tests`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${accessToken}`,
+          'X-YouTube-Channel-Id': selectedChannel.id
+        },
+        body: JSON.stringify({
+          videoId: selectedVideo.id,
+          originalTitle: selectedVideo.title,
+          newTitle: newTitle
+        })
+      });
+      
+      if (response.ok) {
+        setShowCreateTest(false);
+        setNewTitle('');
+        setSelectedVideo(null);
+        setActiveTab('tests');
+        fetchTests();
+      }
+    } catch (error) {
+      console.error('Failed to create test:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const handleLogin = () => {
-    window.location.href = `${API_BASE_URL}/login`;
+    window.location.href = `${API_BASE_URL}/auth`;
   };
 
   const handleLogout = () => {
     setAccessToken(null);
-    setAuthStatus('Logged out.');
+    setAuthStatus('Not authenticated');
+    setChannels([]);
+    setSelectedChannel(null);
     setVideos([]);
     setTests([]);
+    setActiveTab('channels');
   };
 
-  const fetchVideos = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`${API_BASE_URL}/videos`, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setVideos(data.videos || []);
-      } else {
-        throw new Error(data.error || 'Failed to fetch videos');
-      }
-    } catch (error) {
-      setError(`Error fetching videos: ${error.message}`);
+  useEffect(() => {
+    if (activeTab === 'videos' && selectedChannel && videos.length === 0) {
+      fetchVideos();
+    } else if (activeTab === 'tests' && selectedChannel) {
+      fetchTests();
     }
-    setLoading(false);
-  };
-
-  const fetchTests = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`${API_BASE_URL}/tests`, {
-        headers: { 'Authorization': `Bearer ${accessToken}` }
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setTests(data || []);
-      } else {
-        throw new Error(data.error || 'Failed to fetch tests');
-      }
-    } catch (error) {
-      setError(`Error fetching tests: ${error.message}`);
-    }
-    setLoading(false);
-  };
-
-  const createTest = async (testData) => {
-    setLoading(true);
-    setError(null);
-    try {
-      const response = await fetch(`${API_BASE_URL}/tests`, {
-        method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(testData)
-      });
-      const data = await response.json();
-      if (response.ok) {
-        alert('A/B Test created successfully!');
-        setShowCreateTest(false);
-        setSelectedVideo(null);
-        setActiveTab('tests'); // Switch to tests tab to see the new test
-      } else {
-        throw new Error(data.error || 'Failed to create test');
-      }
-    } catch (error) {
-      alert(`Error creating test: ${error.message}`);
-    }
-    setLoading(false);
-  };
-
-  const handleCreateTestClick = (video) => {
-    setSelectedVideo(video);
-    setShowCreateTest(true);
-  };
-
-  // --- RENDER LOGIC ---
-
-  if (!accessToken) {
-    return (
-      <div style={styles.container}>
-        <h1>YouTube A/B Testing Tool</h1>
-        <p>{authStatus}</p>
-        <button onClick={handleLogin} style={styles.loginButton}>Connect YouTube Account</button>
-        {error && <p style={styles.errorText}>{error}</p>}
-      </div>
-    );
-  }
+  }, [activeTab, selectedChannel]);
 
   return (
-    <div style={styles.container}>
-      <div style={styles.header}>
+    <div className="App">
+      <header className="App-header">
         <h1>YouTube A/B Testing Tool</h1>
-        <button onClick={handleLogout} style={styles.logoutButton}>Logout</button>
-      </div>
-      
-      {error && <p style={styles.errorText}>{error}</p>}
-
-      <div style={styles.tabs}>
-        <button onClick={() => setActiveTab('videos')} style={activeTab === 'videos' ? styles.activeTab : styles.tab}>My Videos</button>
-        <button onClick={() => setActiveTab('tests')} style={activeTab === 'tests' ? styles.activeTab : styles.tab}>A/B Tests</button>
-      </div>
-
-      {loading && <p>Loading...</p>}
-
-      {activeTab === 'videos' && !loading && (
-        <div style={styles.grid}>
-          {videos.map(video => (
-            <div key={video.id} style={styles.card}>
-              <img src={video.thumbnail} alt={video.title} style={styles.thumbnail} />
-              <h3 style={styles.cardTitle}>{video.title}</h3>
-              <p style={styles.cardDate}>Published: {new Date(video.publishedAt).toLocaleDateString()}</p>
-              <button onClick={() => handleCreateTestClick(video)} style={styles.createButton}>Create A/B Test</button>
-            </div>
-          ))}
+        
+        {selectedChannel && (
+          <div className="channel-header">
+            <img src={selectedChannel.thumbnail} alt={selectedChannel.title} className="channel-thumbnail" />
+            <span>{selectedChannel.title}</span>
+            <button onClick={() => setShowChannelSelector(true)} className="change-channel-btn">
+              Change Channel
+            </button>
+          </div>
+        )}
+        
+        <div className="status-section">
+          <div className="status-item">
+            <strong>API Status:</strong> {status}
+          </div>
+          <div className="status-item">
+            <strong>Auth Status:</strong> {authStatus}
+          </div>
         </div>
-      )}
 
-      {activeTab === 'tests' && !loading && (
-        <div style={styles.grid}>
-          {tests.length > 0 ? tests.map(test => (
-            <div key={test.testId} style={styles.card}>
-              <h3 style={styles.cardTitle}>{test.videoTitle}</h3>
-              <div style={styles.variants}>
-                <div><strong>A (Original):</strong> {test.variantA.title}</div>
-                <div><strong>B (Test):</strong> {test.variantB.title}</div>
+        {!accessToken ? (
+          <button onClick={handleLogin} className="auth-button">
+            Connect YouTube Account
+          </button>
+        ) : (
+          <div>
+            <button onClick={handleLogout} className="auth-button logout">
+              Logout
+            </button>
+            
+            {!selectedChannel || showChannelSelector ? (
+              <div className="channel-selection">
+                <h2>Select a YouTube Channel</h2>
+                {loading ? (
+                  <p>Loading channels...</p>
+                ) : (
+                  <div className="channels-grid">
+                    {channels.map(channel => (
+                      <div key={channel.id} className="channel-card" onClick={() => selectChannel(channel)}>
+                        <img src={channel.thumbnail} alt={channel.title} />
+                        <h3>{channel.title}</h3>
+                        <p>{parseInt(channel.subscriberCount).toLocaleString()} subscribers</p>
+                        <p>{channel.videoCount} videos</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <p style={styles.cardDate}>Status: <span style={{color: 'green', textTransform: 'capitalize'}}>{test.status}</span></p>
-              <p style={styles.cardDate}>Created: {new Date(test.createdAt).toLocaleString()}</p>
+            ) : (
+              <div>
+                <div className="tabs">
+                  <button 
+                    className={activeTab === 'videos' ? 'tab active' : 'tab'}
+                    onClick={() => setActiveTab('videos')}
+                  >
+                    My Videos
+                  </button>
+                  <button 
+                    className={activeTab === 'tests' ? 'tab active' : 'tab'}
+                    onClick={() => setActiveTab('tests')}
+                  >
+                    A/B Tests
+                  </button>
+                </div>
+
+                {activeTab === 'videos' && (
+                  <div className="videos-section">
+                    <h2>Your Recent Videos</h2>
+                    {loading ? (
+                      <p>Loading videos...</p>
+                    ) : (
+                      <div className="videos-grid">
+                        {videos.map(video => (
+                          <div key={video.id} className="video-card">
+                            <img src={video.thumbnail} alt={video.title} />
+                            <h3>{video.title}</h3>
+                            <button 
+                              onClick={() => {
+                                setSelectedVideo(video);
+                                setShowCreateTest(true);
+                              }}
+                              className="create-test-btn"
+                            >
+                              Create A/B Test
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {activeTab === 'tests' && (
+                  <div className="tests-section">
+                    <h2>Your A/B Tests</h2>
+                    {loading ? (
+                      <p>Loading tests...</p>
+                    ) : tests.length === 0 ? (
+                      <p>No tests created yet. Go to "My Videos" to create your first test!</p>
+                    ) : (
+                      <div className="tests-list">
+                        {tests.map(test => (
+                          <div key={test.testId} className="test-card">
+                            <h3>Video: {test.originalTitle}</h3>
+                            <p><strong>Original:</strong> {test.originalTitle}</p>
+                            <p><strong>New Title:</strong> {test.newTitle}</p>
+                            <p><strong>Status:</strong> {test.status}</p>
+                            <p><strong>Created:</strong> {new Date(test.createdAt).toLocaleDateString()}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+
+        {showCreateTest && selectedVideo && (
+          <div className="modal-overlay">
+            <div className="modal">
+              <h2>Create A/B Test</h2>
+              <p><strong>Video:</strong> {selectedVideo.title}</p>
+              <div className="form-group">
+                <label>New Title to Test:</label>
+                <input
+                  type="text"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  placeholder="Enter alternative title..."
+                />
+              </div>
+              <div className="modal-buttons">
+                <button onClick={() => setShowCreateTest(false)}>Cancel</button>
+                <button onClick={createTest} disabled={!newTitle.trim()}>
+                  Create Test
+                </button>
+              </div>
             </div>
-          )) : <p>No A/B tests found. Create one from the "My Videos" tab!</p>}
-        </div>
-      )}
-
-      {showCreateTest && selectedVideo && (
-        <CreateTestModal video={selectedVideo} onClose={() => setShowCreateTest(false)} onSubmit={createTest} loading={loading} />
-      )}
+          </div>
+        )}
+      </header>
     </div>
   );
 }
-
-function CreateTestModal({ video, onClose, onSubmit, loading }) {
-  const [variantA, setVariantA] = useState({ title: video.title, thumbnail: video.thumbnail });
-  const [variantB, setVariantB] = useState({ title: '', thumbnail: '' });
-
-  const handleSubmit = (e) => {
-    e.preventDefault();
-    if (!variantB.title.trim()) {
-      alert('Please enter a title for Variant B.');
-      return;
-    }
-    onSubmit({ videoId: video.id, videoTitle: video.title, originalThumbnail: video.thumbnail, variantA, variantB });
-  };
-
-  return (
-    <div style={styles.modalOverlay}>
-      <div style={styles.modalContent}>
-        <h2>Create Test for: {video.title}</h2>
-        <form onSubmit={handleSubmit}>
-          <div style={styles.formGroup}>
-            <label>Variant A (Original Title)</label>
-            <input type="text" value={variantA.title} onChange={(e) => setVariantA({ ...variantA, title: e.target.value })} style={styles.input} />
-          </div>
-          <div style={styles.formGroup}>
-            <label>Variant B (New Title)</label>
-            <input type="text" value={variantB.title} onChange={(e) => setVariantB({ ...variantB, title: e.target.value })} style={styles.input} placeholder="Enter new title for testing" required />
-          </div>
-          <div style={styles.modalActions}>
-            <button type="button" onClick={onClose} style={styles.cancelButton} disabled={loading}>Cancel</button>
-            <button type="submit" style={styles.submitButton} disabled={loading}>{loading ? 'Creating...' : 'Start A/B Test'}</button>
-          </div>
-        </form>
-      </div>
-    </div>
-  );
-}
-
-// Basic styling
-const styles = {
-  container: { padding: '20px', fontFamily: 'Arial, sans-serif', maxWidth: '1200px', margin: '0 auto' },
-  header: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #eee', paddingBottom: '10px' },
-  loginButton: { padding: '10px 20px', fontSize: '16px', cursor: 'pointer', backgroundColor: '#4285F4', color: 'white', border: 'none', borderRadius: '5px' },
-  logoutButton: { padding: '8px 12px', cursor: 'pointer', backgroundColor: '#db4437', color: 'white', border: 'none', borderRadius: '5px' },
-  tabs: { margin: '20px 0', borderBottom: '1px solid #ccc' },
-  tab: { padding: '10px 20px', border: 'none', background: 'none', cursor: 'pointer', fontSize: '16px' },
-  activeTab: { padding: '10px 20px', border: 'none', cursor: 'pointer', fontSize: '16px', borderBottom: '3px solid #4285F4', fontWeight: 'bold' },
-  grid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '20px' },
-  card: { border: '1px solid #ddd', borderRadius: '8px', padding: '15px', boxShadow: '0 2px 4px rgba(0,0,0,0.1)', display: 'flex', flexDirection: 'column', justifyContent: 'space-between' },
-  thumbnail: { width: '100%', borderRadius: '4px', aspectRatio: '16 / 9', objectFit: 'cover' },
-  cardTitle: { fontSize: '16px', margin: '10px 0', flexGrow: 1 },
-  cardDate: { fontSize: '12px', color: '#666' },
-  createButton: { width: '100%', padding: '10px', border: 'none', borderRadius: '4px', backgroundColor: '#34A853', color: 'white', cursor: 'pointer', fontSize: '14px', marginTop: '10px' },
-  variants: { fontSize: '14px', background: '#f8f9fa', padding: '10px', borderRadius: '4px', margin: '10px 0' },
-  modalOverlay: { position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0,0,0,0.6)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000 },
-  modalContent: { background: 'white', padding: '30px', borderRadius: '8px', width: '90%', maxWidth: '500px', boxShadow: '0 5px 15px rgba(0,0,0,0.3)' },
-  formGroup: { marginBottom: '15px' },
-  input: { width: 'calc(100% - 22px)', padding: '10px', border: '1px solid #ccc', borderRadius: '4px', fontSize: '14px' },
-  modalActions: { display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '20px' },
-  cancelButton: { padding: '10px 20px', border: '1px solid #ccc', borderRadius: '4px', background: 'white', cursor: 'pointer' },
-  submitButton: { padding: '10px 20px', border: 'none', borderRadius: '4px', background: '#4285F4', color: 'white', cursor: 'pointer' },
-  errorText: { color: 'red', background: '#ffe6e6', padding: '10px', borderRadius: '5px', border: '1px solid red' }
-};
 
 export default App;
