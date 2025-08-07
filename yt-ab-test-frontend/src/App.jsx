@@ -3,20 +3,20 @@ import './App.css';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://xa0etg74tg.execute-api.us-east-1.amazonaws.com/prod';
 
-function App( ) {
+function App() {
   const [status, setStatus] = useState('Connecting...');
   const [authStatus, setAuthStatus] = useState('Not authenticated');
   const [accessToken, setAccessToken] = useState(null);
-  const [channels, setChannels] = useState([]);
-  const [selectedChannel, setSelectedChannel] = useState(null);
   const [videos, setVideos] = useState([]);
   const [tests, setTests] = useState([]);
   const [loading, setLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState('channels');
+  const [activeTab, setActiveTab] = useState('videos');
   const [showCreateTest, setShowCreateTest] = useState(false);
   const [selectedVideo, setSelectedVideo] = useState(null);
-  const [newTitle, setNewTitle] = useState('');
-  const [showChannelSelector, setShowChannelSelector] = useState(false);
+  const [testForm, setTestForm] = useState({
+    variantA: '',
+    variantB: ''
+  });
 
   useEffect(() => {
     // Check URL parameters for OAuth response
@@ -27,12 +27,14 @@ function App( ) {
 
     if (success === 'true' && token) {
       try {
+        // Decode the base64 encoded token
         const decodedToken = atob(token);
         setAccessToken(decodedToken);
         setAuthStatus('Successfully authenticated with YouTube!');
         window.history.replaceState({}, document.title, window.location.pathname);
-        fetchChannels(decodedToken);
+        fetchVideos(decodedToken);
       } catch (e) {
+        console.error('Token decode error:', e);
         setAuthStatus('Authentication successful but token decode failed');
       }
     } else if (error) {
@@ -45,81 +47,31 @@ function App( ) {
       .then(response => response.json())
       .then(data => {
         setStatus('✅ Connected to API');
-        if (data.needsChannel && accessToken) {
-          setActiveTab('channels');
-        }
+        console.log('API Response:', data);
       })
       .catch(error => {
         setStatus('❌ Failed to connect to API');
         console.error('API connection error:', error);
       });
-  }, [accessToken]);
+  }, []);
 
-  const fetchChannels = async (token) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/channels`, {
-        headers: {
-          'Authorization': `Bearer ${token || accessToken}`
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setChannels(data.channels);
-        if (data.selectedChannelId) {
-          const selected = data.channels.find(c => c.id === data.selectedChannelId);
-          if (selected) {
-            setSelectedChannel(selected);
-            setActiveTab('videos');
-          }
-        }
-      }
-    } catch (error) {
-      console.error('Failed to fetch channels:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const selectChannel = async (channel) => {
-    try {
-      setLoading(true);
-      const response = await fetch(`${API_BASE_URL}/channels/select`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`
-        },
-        body: JSON.stringify({ channelId: channel.id })
-      });
-      
-      if (response.ok) {
-        setSelectedChannel(channel);
-        setShowChannelSelector(false);
-        setActiveTab('videos');
-        fetchVideos(channel.id);
-      }
-    } catch (error) {
-      console.error('Failed to select channel:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchVideos = async (channelId) => {
+  const fetchVideos = async (token = accessToken) => {
+    if (!token) return;
+    
     try {
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/videos`, {
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'X-YouTube-Channel-Id': channelId || selectedChannel?.id
+          'Authorization': `Bearer ${token}`
         }
       });
       
       if (response.ok) {
         const data = await response.json();
-        setVideos(data.videos);
+        setVideos(data.videos || []);
+      } else {
+        console.error('Failed to fetch videos:', response.statusText);
+        setAuthStatus('Failed to fetch videos - token may be invalid');
       }
     } catch (error) {
       console.error('Failed to fetch videos:', error);
@@ -129,20 +81,19 @@ function App( ) {
   };
 
   const fetchTests = async () => {
-    if (!selectedChannel) return;
+    if (!accessToken) return;
     
     try {
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/tests`, {
         headers: {
-          'Authorization': `Bearer ${accessToken}`,
-          'X-YouTube-Channel-Id': selectedChannel.id
+          'Authorization': `Bearer ${accessToken}`
         }
       });
       
       if (response.ok) {
         const data = await response.json();
-        setTests(data.tests);
+        setTests(data || []);
       }
     } catch (error) {
       console.error('Failed to fetch tests:', error);
@@ -152,72 +103,72 @@ function App( ) {
   };
 
   const createTest = async () => {
+    if (!testForm.variantA.trim() || !testForm.variantB.trim()) {
+      alert('Please fill in both thumbnail variants');
+      return;
+    }
+
     try {
       setLoading(true);
       const response = await fetch(`${API_BASE_URL}/tests`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${accessToken}`,
-          'X-YouTube-Channel-Id': selectedChannel.id
+          'Authorization': `Bearer ${accessToken}`
         },
         body: JSON.stringify({
           videoId: selectedVideo.id,
-          originalTitle: selectedVideo.title,
-          newTitle: newTitle
+          videoTitle: selectedVideo.title,
+          originalThumbnail: selectedVideo.thumbnail,
+          variantA: testForm.variantA,
+          variantB: testForm.variantB
         })
       });
       
       if (response.ok) {
         setShowCreateTest(false);
-        setNewTitle('');
+        setTestForm({ variantA: '', variantB: '' });
         setSelectedVideo(null);
         setActiveTab('tests');
         fetchTests();
+      } else {
+        const errorData = await response.json();
+        alert(`Failed to create test: ${errorData.error || 'Unknown error'}`);
       }
     } catch (error) {
       console.error('Failed to create test:', error);
+      alert('Failed to create test: Network error');
     } finally {
       setLoading(false);
     }
   };
 
   const handleLogin = () => {
-    window.location.href = `${API_BASE_URL}/auth`;
+    window.location.href = `${API_BASE_URL}/login`;
   };
 
   const handleLogout = () => {
     setAccessToken(null);
     setAuthStatus('Not authenticated');
-    setChannels([]);
-    setSelectedChannel(null);
     setVideos([]);
     setTests([]);
-    setActiveTab('channels');
+    setActiveTab('videos');
   };
 
   useEffect(() => {
-    if (activeTab === 'videos' && selectedChannel && videos.length === 0) {
-      fetchVideos();
-    } else if (activeTab === 'tests' && selectedChannel) {
-      fetchTests();
+    if (accessToken) {
+      if (activeTab === 'videos' && videos.length === 0) {
+        fetchVideos();
+      } else if (activeTab === 'tests') {
+        fetchTests();
+      }
     }
-  }, [activeTab, selectedChannel]);
+  }, [activeTab, accessToken]);
 
   return (
     <div className="App">
       <header className="App-header">
-        <h1>YouTube A/B Testing Tool</h1>
-        
-        {selectedChannel && (
-          <div className="channel-header">
-            <img src={selectedChannel.thumbnail} alt={selectedChannel.title} className="channel-thumbnail" />
-            <span>{selectedChannel.title}</span>
-            <button onClick={() => setShowChannelSelector(true)} className="change-channel-btn">
-              Change Channel
-            </button>
-          </div>
-        )}
+        <h1>🎥 YouTube A/B Testing Tool</h1>
         
         <div className="status-section">
           <div className="status-item">
@@ -226,100 +177,112 @@ function App( ) {
           <div className="status-item">
             <strong>Auth Status:</strong> {authStatus}
           </div>
+          {accessToken && (
+            <div className="status-item">
+              <strong>Videos Loaded:</strong> {videos.length}
+            </div>
+          )}
         </div>
 
         {!accessToken ? (
-          <button onClick={handleLogin} className="auth-button">
-            Connect YouTube Account
-          </button>
+          <div>
+            <p style={{ fontSize: '18px', marginBottom: '30px', color: '#b3d9ff' }}>
+              Connect your YouTube account to start creating thumbnail A/B tests
+            </p>
+            <button onClick={handleLogin} className="auth-button">
+              🔗 Connect YouTube Account
+            </button>
+          </div>
         ) : (
           <div>
             <button onClick={handleLogout} className="auth-button logout">
-              Logout
+              🚪 Logout
             </button>
             
-            {!selectedChannel || showChannelSelector ? (
-              <div className="channel-selection">
-                <h2>Select a YouTube Channel</h2>
+            <div className="tabs">
+              <button 
+                className={activeTab === 'videos' ? 'tab active' : 'tab'}
+                onClick={() => setActiveTab('videos')}
+              >
+                📹 My Videos
+              </button>
+              <button 
+                className={activeTab === 'tests' ? 'tab active' : 'tab'}
+                onClick={() => setActiveTab('tests')}
+              >
+                🧪 A/B Tests
+              </button>
+            </div>
+
+            {activeTab === 'videos' && (
+              <div className="videos-section">
+                <h2>Your Recent Videos</h2>
                 {loading ? (
-                  <p>Loading channels...</p>
+                  <p>Loading videos...</p>
+                ) : videos.length === 0 ? (
+                  <div style={{ padding: '40px', color: '#b3d9ff' }}>
+                    <p>No videos found. Make sure you have videos on your YouTube channel.</p>
+                  </div>
                 ) : (
-                  <div className="channels-grid">
-                    {channels.map(channel => (
-                      <div key={channel.id} className="channel-card" onClick={() => selectChannel(channel)}>
-                        <img src={channel.thumbnail} alt={channel.title} />
-                        <h3>{channel.title}</h3>
-                        <p>{parseInt(channel.subscriberCount).toLocaleString()} subscribers</p>
-                        <p>{channel.videoCount} videos</p>
+                  <div className="videos-grid">
+                    {videos.map(video => (
+                      <div key={video.id} className="video-card">
+                        <img src={video.thumbnail} alt={video.title} />
+                        <h3>{video.title}</h3>
+                        <p style={{ color: '#b3d9ff', fontSize: '14px', marginBottom: '15px' }}>
+                          Published: {new Date(video.publishedAt).toLocaleDateString()}
+                        </p>
+                        <button 
+                          onClick={() => {
+                            setSelectedVideo(video);
+                            setShowCreateTest(true);
+                          }}
+                          className="create-test-btn"
+                        >
+                          🧪 Create A/B Test
+                        </button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-            ) : (
-              <div>
-                <div className="tabs">
-                  <button 
-                    className={activeTab === 'videos' ? 'tab active' : 'tab'}
-                    onClick={() => setActiveTab('videos')}
-                  >
-                    My Videos
-                  </button>
-                  <button 
-                    className={activeTab === 'tests' ? 'tab active' : 'tab'}
-                    onClick={() => setActiveTab('tests')}
-                  >
-                    A/B Tests
-                  </button>
-                </div>
+            )}
 
-                {activeTab === 'videos' && (
-                  <div className="videos-section">
-                    <h2>Your Recent Videos</h2>
-                    {loading ? (
-                      <p>Loading videos...</p>
-                    ) : (
-                      <div className="videos-grid">
-                        {videos.map(video => (
-                          <div key={video.id} className="video-card">
-                            <img src={video.thumbnail} alt={video.title} />
-                            <h3>{video.title}</h3>
-                            <button 
-                              onClick={() => {
-                                setSelectedVideo(video);
-                                setShowCreateTest(true);
-                              }}
-                              className="create-test-btn"
-                            >
-                              Create A/B Test
-                            </button>
-                          </div>
-                        ))}
-                      </div>
-                    )}
+            {activeTab === 'tests' && (
+              <div className="tests-section">
+                <h2>Your A/B Tests</h2>
+                {loading ? (
+                  <p>Loading tests...</p>
+                ) : tests.length === 0 ? (
+                  <div style={{ padding: '40px', color: '#b3d9ff' }}>
+                    <p>No tests created yet. Go to "My Videos" to create your first test!</p>
                   </div>
-                )}
-
-                {activeTab === 'tests' && (
-                  <div className="tests-section">
-                    <h2>Your A/B Tests</h2>
-                    {loading ? (
-                      <p>Loading tests...</p>
-                    ) : tests.length === 0 ? (
-                      <p>No tests created yet. Go to "My Videos" to create your first test!</p>
-                    ) : (
-                      <div className="tests-list">
-                        {tests.map(test => (
-                          <div key={test.testId} className="test-card">
-                            <h3>Video: {test.originalTitle}</h3>
-                            <p><strong>Original:</strong> {test.originalTitle}</p>
-                            <p><strong>New Title:</strong> {test.newTitle}</p>
-                            <p><strong>Status:</strong> {test.status}</p>
-                            <p><strong>Created:</strong> {new Date(test.createdAt).toLocaleDateString()}</p>
+                ) : (
+                  <div className="tests-list">
+                    {tests.map(test => (
+                      <div key={test.testId} className="test-card">
+                        <h3>📹 {test.videoTitle}</h3>
+                        <p><strong>Video ID:</strong> {test.videoId}</p>
+                        <p><strong>Variant A:</strong> {test.variantA}</p>
+                        <p><strong>Variant B:</strong> {test.variantB}</p>
+                        <p><strong>Status:</strong> <span style={{color: test.status === 'active' ? '#4caf50' : '#ff9800'}}>{test.status}</span></p>
+                        <p><strong>Created:</strong> {new Date(test.createdAt).toLocaleDateString()}</p>
+                        
+                        {test.metrics && (
+                          <div style={{ marginTop: '15px', padding: '15px', background: 'rgba(79, 195, 247, 0.1)', borderRadius: '8px' }}>
+                            <h4 style={{ color: '#4fc3f7', margin: '0 0 10px 0' }}>📊 Test Results</h4>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                              <div>
+                                <strong>Variant A:</strong> {test.metrics.variantA?.views || 0} views, {test.metrics.variantA?.clicks || 0} clicks
+                              </div>
+                              <div>
+                                <strong>Variant B:</strong> {test.metrics.variantB?.views || 0} views, {test.metrics.variantB?.clicks || 0} clicks
+                              </div>
+                            </div>
                           </div>
-                        ))}
+                        )}
                       </div>
-                    )}
+                    ))}
                   </div>
                 )}
               </div>
@@ -330,21 +293,44 @@ function App( ) {
         {showCreateTest && selectedVideo && (
           <div className="modal-overlay">
             <div className="modal">
-              <h2>Create A/B Test</h2>
-              <p><strong>Video:</strong> {selectedVideo.title}</p>
+              <h2>🧪 Create A/B Test</h2>
+              <p style={{ color: '#b3d9ff', marginBottom: '25px' }}>
+                <strong>Video:</strong> {selectedVideo.title}
+              </p>
+              
               <div className="form-group">
-                <label>New Title to Test:</label>
+                <label>🖼️ Thumbnail Variant A URL:</label>
                 <input
                   type="text"
-                  value={newTitle}
-                  onChange={(e) => setNewTitle(e.target.value)}
-                  placeholder="Enter alternative title..."
+                  value={testForm.variantA}
+                  onChange={(e) => setTestForm({...testForm, variantA: e.target.value})}
+                  placeholder="Enter URL for first thumbnail variant..."
                 />
               </div>
+              
+              <div className="form-group">
+                <label>🖼️ Thumbnail Variant B URL:</label>
+                <input
+                  type="text"
+                  value={testForm.variantB}
+                  onChange={(e) => setTestForm({...testForm, variantB: e.target.value})}
+                  placeholder="Enter URL for second thumbnail variant..."
+                />
+              </div>
+              
               <div className="modal-buttons">
-                <button onClick={() => setShowCreateTest(false)}>Cancel</button>
-                <button onClick={createTest} disabled={!newTitle.trim()}>
-                  Create Test
+                <button onClick={() => {
+                  setShowCreateTest(false);
+                  setTestForm({ variantA: '', variantB: '' });
+                  setSelectedVideo(null);
+                }}>
+                  Cancel
+                </button>
+                <button 
+                  onClick={createTest} 
+                  disabled={!testForm.variantA.trim() || !testForm.variantB.trim() || loading}
+                >
+                  {loading ? 'Creating...' : 'Create Test'}
                 </button>
               </div>
             </div>
